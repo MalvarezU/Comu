@@ -2,6 +2,8 @@ import sys
 
 import click
 
+import ipaddress
+
 from . import __version__
 from .config import Config, detectar_interfaz
 from .commands import dhcp as cmd_dhcp
@@ -11,6 +13,14 @@ from .commands import panel as cmd_panel
 from .commands import red as cmd_red
 from .commands import web as cmd_web
 from .runner import Contexto, Runner
+
+
+def _ip(valor: str, etiqueta: str) -> str:
+    try:
+        ipaddress.ip_address(valor)
+    except ValueError:
+        raise click.ClickException(f"{etiqueta} no es una IP válida: {valor}")
+    return valor
 
 
 def _abrir_tui(cfg: Config) -> None:
@@ -108,6 +118,17 @@ def cli(
         inicio, fin = (parte.strip() for parte in rango.split("-", 1))
     except ValueError:
         raise click.ClickException("--rango debe tener el formato IP_inicio-IP_fin")
+    ip_dns = _ip(ip_dns, "--ip-dns")
+    ip_www = _ip(ip_www, "--ip-www")
+    ip_correo = _ip(ip_correo, "--ip-correo")
+    gateway = _ip(gateway, "--gateway")
+    inicio = _ip(inicio, "El inicio de --rango")
+    fin = _ip(fin, "El fin de --rango")
+    forwarders = tuple(
+        _ip(p.strip(), f"El forwarder '{p.strip()}'")
+        for p in forwarders.split(",")
+        if p.strip()
+    )
     cfg = Config(
         dominio=dominio,
         interfaz=interfaz,
@@ -115,7 +136,7 @@ def cli(
         ip_www=ip_www,
         ip_correo=ip_correo,
         gateway=gateway,
-        forwarders=tuple(p.strip() for p in forwarders.split(",") if p.strip()),
+        forwarders=forwarders,
         rango_inicio=inicio,
         rango_fin=fin,
         lease_default=lease_default,

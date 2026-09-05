@@ -69,19 +69,20 @@ $TTL 604800
                     604800 )  ; Negative Cache TTL
 ;
 @                   IN    NS    ns.{d}.
-{ultimo(cfg.ip_dns)}     IN    PTR   ns.{d}.
-{ultimo(cfg.ip_www)}     IN    PTR   www.{d}.
-{ultimo(cfg.ip_correo)}  IN    PTR   correo.{d}.
+{ultimo(cfg.ip_dns):<7}IN    PTR   ns.{d}.
+{ultimo(cfg.ip_www):<7}IN    PTR   www.{d}.
+{ultimo(cfg.ip_correo):<7}IN    PTR   correo.{d}.
 """
 
 
 def dhcpd_conf(cfg: Config) -> str:
     a, b, c, _ = cfg.ip_dns.split(".")
     subred = f"{a}.{b}.{c}.0"
+    dns_servers = ", ".join((cfg.ip_dns, *cfg.forwarders))
     return f"""# Configuración generada por servidores-cli
 subnet {subred} netmask {cfg.netmask} {{
     range {cfg.rango_inicio} {cfg.rango_fin};
-    option domain-name-servers {cfg.ip_dns}, {cfg.forwarders[0]};
+    option domain-name-servers {dns_servers};
     option domain-name "{cfg.dominio}";
     option routers {cfg.gateway};
     option broadcast-address {cfg.broadcast};

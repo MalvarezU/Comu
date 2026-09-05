@@ -101,6 +101,8 @@ class Runner:
                 res = subprocess.run(cmd, env=self._env(), text=True, timeout=timeout)
         except subprocess.TimeoutExpired:
             raise click.ClickException(f"Tiempo agotado: {self._texto(cmd)}")
+        except FileNotFoundError:
+            raise click.ClickException(f"Comando no encontrado: {self._texto(cmd)}")
         if check and res.returncode != 0:
             raise click.ClickException(
                 f"Falló (rc={res.returncode}): {self._texto(cmd)}"

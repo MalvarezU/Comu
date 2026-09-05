@@ -62,8 +62,6 @@ class Config:
 
 
 def detectar_interfaz() -> str:
-    import os
-
     for nombre in sorted(os.listdir("/sys/class/net")):
         if nombre != "lo":
             return nombre

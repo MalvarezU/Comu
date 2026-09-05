@@ -79,6 +79,7 @@ def _configurar(app):
         run.detalle(salida)
     run.ok("Configuración DNS validada")
 
+
 def _iniciar(app):
     app.run.check_root()
     app.run.run(["systemctl", "restart", SERVICIO], check=True)

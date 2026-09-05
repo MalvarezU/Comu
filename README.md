@@ -11,6 +11,23 @@ Sin argumentos abre el TUI; con subcomando corre el CLI.
 
 ## Instalación (una vez por máquina)
 
+### Opción 1 · Paquete .deb (recomendado para el laboratorio)
+
+Doble clic en `dist/servidores-cli_0.1.0_all.deb`, o por terminal:
+
+```bash
+sudo apt install ./dist/servidores-cli_0.1.0_all.deb
+```
+
+Instala `servidores`/`srv`, sus dependencias (`python3-click`, `python3-textual`)
+y un lanzador en el menú ("Servidores CLI"). Para reconstruir el paquete:
+
+```bash
+./packaging/build-deb.sh   # deja el .deb en dist/ (solo necesita sh, ar, tar, gzip, python3)
+```
+
+### Opción 2 · venv + pip
+
 ```bash
 cd servidores-cli
 python3 -m venv ~/.venv-serv
@@ -80,3 +97,14 @@ Opciones globales (van entre `servidores` y el subcomando):
 - `El TUI necesita 'textual'` → `pip install textual` o use los subcomandos CLI.
 - Pruebas que fallan con `SIN RESPUESTA` → verifique red (`red estado`, `panel`) y
   firewall (`red firewall desactivar` solo en laboratorio).
+
+## Tests
+
+```bash
+~/.venv-serv/bin/pip install -e ".[test]"
+~/.venv-serv/bin/python -m pytest
+```
+
+Cubre plantillas, configuración persistente, clasificación de roles, runner
+(incl. dry-run) y humo del CLI completo (`--dry-run deploy`, validación de
+opciones, panel). No requiere root ni tocar el sistema.

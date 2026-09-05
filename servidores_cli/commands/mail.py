@@ -194,6 +194,7 @@ def _probar(app, servidor, usuario1, usuario2, clave) -> bool:
             cantidad = len(datos[0].split()) if estado == "OK" and datos and datos[0] else 0
             run.ok(f"Buzón IMAP de {usuario2}: {cantidad} mensaje(s)")
     except Exception as e:
-        run.warn(f"No se pudo verificar el buzón IMAP: {e}")
+        fallos += 1
+        run.error(f"No se pudo verificar el buzón IMAP: {e}")
         run.warn("¿Ya creó los usuarios? Ejecute: sudo servidores mail usuarios")
     return fallos == 0

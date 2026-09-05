@@ -435,7 +435,8 @@ class Topologia(Screen):
             self.action_parametros()
 
 
-CAMPOS_PARAMETROS = (    ("dominio", "Dominio del laboratorio", "texto"),
+CAMPOS_PARAMETROS = (
+    ("dominio", "Dominio del laboratorio", "texto"),
     ("interfaz", "Interfaz de red (eth0 / auto)", "texto"),
     ("ip_dns", "IP del servidor DNS+DHCP (ej. 192.168.1.10)", "ip"),
     ("ip_www", "IP del servidor web", "ip"),
