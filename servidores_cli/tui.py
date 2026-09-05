@@ -5,6 +5,7 @@ import socket
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, VerticalScroll
+from textual.screen import Screen
 from textual.widgets import Button, DataTable, Footer, Header, Input, Label, Static
 from rich.text import Text
 
@@ -14,6 +15,42 @@ from .config import Config, aplicar_config, cargar_config, guardar_config
 from .tui_base import CSS, PASOS_DEPLOY, SERVICIOS, Bitacora, PantallaConBitacora
 
 
+def sondear_topologia(cfg):
+    datos = []
+    for largo, corto, host, ip, puerto in (
+        ("SERVIDOR DNS + DHCP", "DNS+DHCP", f"ns.{cfg.dominio}", cfg.ip_dns, None),
+        ("SERVIDOR Web", "Web", f"www.{cfg.dominio}", cfg.ip_www, 80),
+        ("SERVIDOR Correo", "Correo", f"correo.{cfg.dominio}", cfg.ip_correo, 25),
+    ):
+        vivo = _ping_ok(ip)
+        tcp = _tcp_ok(ip, puerto) if (vivo and puerto) else None
+        datos.append(
+            {"largo": largo, "corto": corto, "host": host, "ip": ip,
+             "puerto": puerto, "vivo": vivo, "tcp": tcp}
+        )
+    return datos
+
+
+def estado_verbose(d):
+    if d["vivo"] is None:
+        return "(sin sondeo)"
+    if not d["vivo"]:
+        return "SIN RESPUESTA"
+    if d["puerto"] is None:
+        return "ALCANZABLE (ping)"
+    return f"ALCANZABLE · {d['puerto']}/TCP " + ("abierto" if d["tcp"] else "cerrado")
+
+
+def estado_compacto(d):
+    if d["vivo"] is None:
+        return "(?)"
+    if not d["vivo"]:
+        return "[X]"
+    if d["puerto"] is None:
+        return "[OK]"
+    return f"[OK:{d['puerto']}]" if d["tcp"] else f"[!]:{d['puerto']}"
+
+
 class Panel(PantallaConBitacora):
     BINDINGS = [
         Binding("p", "refrescar", "Refrescar"),
@@ -21,6 +58,7 @@ class Panel(PantallaConBitacora):
         Binding("n", "red_config", "Red: configurar"),
         Binding("r", "red_estado", "Red: estado"),
         Binding("f", "firewall", "Firewall"),
+        Binding("t", "topologia", "Topología"),
         Binding("c", "parametros", "Parámetros"),
         Binding("1", "abrir_servicio('dns')", "DNS"),
         Binding("2", "abrir_servicio('dhcp')", "DHCP"),
@@ -30,31 +68,39 @@ class Panel(PantallaConBitacora):
 
     def compose(self) -> ComposeResult:
         yield Header()
+        yield Static("== Panel principal ==", id="titulo")
         with Horizontal(id="principal"):
             with VerticalScroll(id="panel_info"):
                 yield Static(id="rol")
                 yield DataTable(id="topologia")
-                yield Static(id="nodos")
-                yield Static(id="aviso_root")
+                yield Static(
+                    Text(
+                        "Maq.=esta máquina · [OK]=responde · [OK:80]=puerto abierto · "
+                        "[X]=sin respuesta"
+                    ),
+                    id="leyenda",
+                )
             with VerticalScroll(id="menu"):
                 yield Label("[b]Asistente completo[/b]")
                 yield Button("Desplegar TODO paso a paso", id="btn_deploy", variant="primary")
                 yield Label("[b]Servidores (menú anidado)[/b]")
                 yield Button("1 · DNS (Bind9) · UDP 53", id="btn_dns")
-                yield Button("2 · DHCP (isc-dhcp) · UDP 67/68", id="btn_dhcp")
-                yield Button("3 · Correo (Postfix+Dovecot) · 25/143", id="btn_correo")
+                yield Button("2 · DHCP · UDP 67/68", id="btn_dhcp")
+                yield Button("3 · Correo · SMTP/IMAP", id="btn_correo")
                 yield Button("4 · Web (Apache2) · TCP 80", id="btn_web")
                 yield Label("[b]General[/b]")
                 yield Button("Configurar red (IP estática)", id="btn_red")
                 yield Button("Estado de red (ip a / rutas)", id="btn_red_estado")
                 yield Button("Firewall (ufw)", id="btn_firewall")
+                yield Button("Topología y roles (t)", id="btn_topologia")
                 yield Button("Parámetros del laboratorio", id="btn_parametros")
         yield Bitacora(id="log")
         yield Footer()
 
     def on_mount(self) -> None:
         tabla = self.query_one("#topologia", DataTable)
-        tabla.add_columns("Servicio", "Host", "IP", "Estado desde aquí", "Esta máq.")
+        tabla.add_columns("Servicio", "IP", "Estado", "Maq.")
+        self.query_one("#btn_deploy", Button).focus()
         self.refrescar()
 
     def on_screen_resume(self) -> None:
@@ -68,22 +114,11 @@ class Panel(PantallaConBitacora):
         entradas = _ipv4_locales()
         solo = [ip for _, ip in entradas]
         rol, roles = _clasificar(cfg, solo)
-        filas = []
-        for nombre, host, ip, puerto in (
-            ("DNS + DHCP", f"ns.{cfg.dominio}", cfg.ip_dns, None),
-            ("Web", f"www.{cfg.dominio}", cfg.ip_www, 80),
-            ("Correo", f"correo.{cfg.dominio}", cfg.ip_correo, 25),
-        ):
-            vivo = _ping_ok(ip)
-            if vivo is None:
-                estado = "(sin sondeo)"
-            elif not vivo:
-                estado = "SIN RESPUESTA"
-            elif puerto is None:
-                estado = "ALCANZABLE (ping)"
-            else:
-                estado = f"ALCANZABLE · {puerto}/TCP " + ("abierto" if _tcp_ok(ip, puerto) else "cerrado")
-            filas.append((nombre, host, ip, estado, "SÍ" if ip in solo else ""))
+        filas = [
+            (d["corto"], d["ip"], estado_compacto(d), "SÍ" if d["ip"] in solo else "")
+            for d in sondear_topologia(cfg)
+        ]
+        filas.append(("Receptores", "rango DHCP", "—", ""))
         self.app.call_from_thread(self._pintar, entradas, rol, roles, filas)
 
     def _pintar(self, entradas, rol, roles, filas) -> None:
@@ -94,6 +129,8 @@ class Panel(PantallaConBitacora):
             rol_txt = f"[b green]*** {rol} ***[/]\n{detalle}"
         else:
             rol_txt = f"[b yellow]*** {rol} ***[/]"
+        if os.geteuid() != 0:
+            rol_txt += "\n[b yellow]Sin root: solo sondea y prueba. Use: sudo servidores[/]"
         self.query_one("#rol", Static).update(
             f"[b]Host:[/] {socket.gethostname()}    [b]IP local:[/] {ips}\n"
             f"[b]Dominio:[/] {cfg.dominio}    [b]Red:[/] {cfg.red}\n{rol_txt}"
@@ -102,16 +139,6 @@ class Panel(PantallaConBitacora):
         tabla.clear()
         for fila in filas:
             tabla.add_row(*fila)
-        self.query_one("#nodos", Static).update(
-            f"[b]Nodos/clientes:[/] {cfg.rango_inicio} - {cfg.rango_fin} (DHCP) o IP estáticas · solo consultan"
-        )
-        if os.geteuid() == 0:
-            self.query_one("#aviso_root", Static).update("")
-        else:
-            self.query_one("#aviso_root", Static).update(
-                "[b yellow]Sin root: puede sondear y probar, pero no instalar ni configurar."
-                " Ejecute: sudo servidores[/]"
-            )
         self.app.sub_title = (
             f"{cfg.dominio} · {cfg.red}"
             f"{' · DRY-RUN' if self.app.dry_run else ''}"
@@ -129,6 +156,9 @@ class Panel(PantallaConBitacora):
 
     def action_firewall(self) -> None:
         self.app.push_screen(FirewallMenu())
+
+    def action_topologia(self) -> None:
+        self.app.push_screen(Topologia())
 
     def action_red_config(self) -> None:
         self.ejecutar("Configurar red", red._configurar)
@@ -149,6 +179,7 @@ class Panel(PantallaConBitacora):
             "btn_red": self.action_red_config,
             "btn_red_estado": self.action_red_estado,
             "btn_firewall": self.action_firewall,
+            "btn_topologia": self.action_topologia,
             "btn_parametros": self.action_parametros,
         }
         accion = mapa.get(evento.button.id)
@@ -160,7 +191,8 @@ class PantallaServicio(PantallaConBitacora):
     BINDINGS = [
         Binding("escape", "volver", "Volver"),
         Binding("q", "volver", "Volver"),
-    ]
+        Binding("t", "todos", "Todos"),
+    ] + [Binding(str(i), f"atajo('{i}')", "") for i in range(1, 10)]
 
     def __init__(self, spec):
         super().__init__()
@@ -178,30 +210,46 @@ class PantallaServicio(PantallaConBitacora):
 
     def compose(self) -> ComposeResult:
         yield Header()
+        yield Static(f"== {self.spec['titulo']} ==", id="titulo")
         with Horizontal(id="principal"):
             with VerticalScroll(id="pasos_col"):
                 yield Static(self._intro(), id="intro")
                 yield Label("[b]Pasos en orden (asistente)[/b]")
                 for i, (etiqueta, _) in enumerate(self.spec["pasos"], 1):
-                    yield Button(f"{i}. {etiqueta}", id=f"paso_{i}")
-                yield Button("Ejecutar TODOS los pasos", id="btn_todos", variant="primary")
+                    yield Button(f"[{i}] {etiqueta}", id=f"paso_{i}")
+                yield Button("[T] Ejecutar TODOS los pasos", id="btn_todos", variant="primary")
             with VerticalScroll(id="extras_col"):
                 yield Label("[b]Verificación y extras[/b]")
-                for i, (etiqueta, _) in enumerate(self.spec["extras"], 1):
-                    yield Button(etiqueta, id=f"extra_{i}")
+                base = len(self.spec["pasos"])
+                for j, (etiqueta, _) in enumerate(self.spec["extras"], base + 1):
+                    yield Button(f"[{j}] {etiqueta}", id=f"extra_{j - base}")
                 yield Button("Volver (Esc)", id="btn_volver", variant="error")
         yield Bitacora(id="log")
         yield Footer()
 
+    def on_mount(self) -> None:
+        self.app.sub_title = f"{self.app.cfg.dominio} · {self.spec['titulo']}"
+        self.query_one("#paso_1", Button).focus()
+
     def action_volver(self) -> None:
         self.app.pop_screen()
+
+    def action_todos(self) -> None:
+        self.secuencia(self.spec["titulo"], self.spec["pasos"])
+
+    def action_atajo(self, tecla: str) -> None:
+        plana = list(self.spec["pasos"]) + list(self.spec["extras"])
+        indice = int(tecla) - 1
+        if 0 <= indice < len(plana):
+            etiqueta, funcion = plana[indice]
+            self.ejecutar(etiqueta, funcion)
 
     def on_button_pressed(self, evento: Button.Pressed) -> None:
         ident = evento.button.id
         if ident == "btn_volver":
             self.action_volver()
         elif ident == "btn_todos":
-            self.secuencia(self.spec["titulo"], self.spec["pasos"])
+            self.action_todos()
         elif ident and ident.startswith("paso_"):
             indice = int(ident.split("_")[1]) - 1
             etiqueta, funcion = self.spec["pasos"][indice]
@@ -217,6 +265,7 @@ class AsistenteDeploy(PantallaConBitacora):
 
     def compose(self) -> ComposeResult:
         yield Header()
+        yield Static("== Despliegue completo ==", id="titulo")
         with Horizontal(id="principal"):
             with VerticalScroll(id="lista_pasos"):
                 yield Static(
@@ -248,6 +297,10 @@ class AsistenteDeploy(PantallaConBitacora):
         texto.stylize(estilo, 0, len(simbolo))
         self.query_one(f"#dep_{indice}", Static).update(texto)
 
+    def on_mount(self) -> None:
+        self.app.sub_title = f"{self.app.cfg.dominio} · Despliegue completo"
+        self.query_one("#btn_iniciar", Button).focus()
+
     def action_volver(self) -> None:
         self.app.pop_screen()
 
@@ -263,6 +316,7 @@ class FirewallMenu(PantallaConBitacora):
 
     def compose(self) -> ComposeResult:
         yield Header()
+        yield Static("== Firewall (ufw) ==", id="titulo")
         with Horizontal(id="principal"):
             with VerticalScroll(id="pasos_col"):
                 yield Static(
@@ -280,6 +334,10 @@ class FirewallMenu(PantallaConBitacora):
         yield Bitacora(id="log")
         yield Footer()
 
+    def on_mount(self) -> None:
+        self.app.sub_title = f"{self.app.cfg.dominio} · Firewall"
+        self.query_one("#btn_fw_estado", Button).focus()
+
     def action_volver(self) -> None:
         self.app.pop_screen()
 
@@ -292,8 +350,92 @@ class FirewallMenu(PantallaConBitacora):
             self.ejecutar("Desactivar firewall", red._firewall, "desactivar")
 
 
-CAMPOS_PARAMETROS = (
-    ("dominio", "Dominio del laboratorio", "texto"),
+class Topologia(Screen):
+    BINDINGS = [
+        Binding("escape", "volver", "Volver"),
+        Binding("q", "volver", "Volver"),
+        Binding("p", "refrescar", "Sondear"),
+        Binding("c", "parametros", "Configurar"),
+    ]
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        yield Static("== Topología y roles ==", id="titulo")
+        with Horizontal(id="principal"):
+            with VerticalScroll(id="lista_pasos"):
+                yield Static(
+                    "[b]SERVIDOR/HOST[/] = PC con la IP del servicio (.10/.12/.13): instala y atiende.\n"
+                    "[b]RECEPTORES[/] = demás PCs (rango DHCP o IP fija): solo consultan y prueban.\n"
+                    "La columna 'Esta máq.' dice qué es ESTA máquina.",
+                    id="intro_dep",
+                )
+                yield DataTable(id="topologia")
+                yield Static(id="nota")
+            with VerticalScroll(id="menu"):
+                yield Label("[b]Acciones[/b]")
+                yield Button("Sondear de nuevo (p)", id="btn_sondear")
+                yield Button("Configurar topología (c)", id="btn_conf")
+                yield Button("Volver (Esc)", id="btn_volver", variant="error")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self.app.sub_title = f"{self.app.cfg.dominio} · Topología y roles"
+        tabla = self.query_one("#topologia", DataTable)
+        tabla.add_columns("Rol", "Host", "IP", "Estado desde aquí", "Esta máq.")
+        self.query_one("#btn_sondear", Button).focus()
+        self.refrescar()
+
+    def refrescar(self) -> None:
+        self.run_worker(self._sondear, thread=True, exclusive=True)
+
+    def _sondear(self) -> None:
+        cfg = self.app.cfg
+        solo = [ip for _, ip in _ipv4_locales()]
+        filas = [
+            (d["largo"], d["host"], d["ip"], estado_verbose(d),
+             "SÍ - esta máquina" if d["ip"] in solo else "")
+            for d in sondear_topologia(cfg)
+        ]
+        filas.append(
+            (
+                "RECEPTORES (clientes)",
+                "PCs del laboratorio",
+                f"{cfg.rango_inicio} - {cfg.rango_fin}",
+                "solo consultan servicios",
+                "",
+            )
+        )
+        self.app.call_from_thread(self._pintar, filas)
+
+    def _pintar(self, filas) -> None:
+        tabla = self.query_one("#topologia", DataTable)
+        tabla.clear()
+        for fila in filas:
+            tabla.add_row(*fila)
+        self.query_one("#nota", Static).update(
+            "Para cambiar dominio, IPs o rango: pulse c (Parámetros). "
+            "Al volver, la tabla se actualiza sola."
+        )
+
+    def action_volver(self) -> None:
+        self.app.pop_screen()
+
+    def action_refrescar(self) -> None:
+        self.refrescar()
+
+    def action_parametros(self) -> None:
+        self.app.push_screen(Parametros(self.app.cfg))
+
+    def on_button_pressed(self, evento: Button.Pressed) -> None:
+        if evento.button.id == "btn_volver":
+            self.action_volver()
+        elif evento.button.id == "btn_sondear":
+            self.action_refrescar()
+        elif evento.button.id == "btn_conf":
+            self.action_parametros()
+
+
+CAMPOS_PARAMETROS = (    ("dominio", "Dominio del laboratorio", "texto"),
     ("interfaz", "Interfaz de red (eth0 / auto)", "texto"),
     ("ip_dns", "IP del servidor DNS+DHCP (ej. 192.168.1.10)", "ip"),
     ("ip_www", "IP del servidor web", "ip"),
@@ -315,6 +457,7 @@ class Parametros(PantallaConBitacora):
 
     def compose(self) -> ComposeResult:
         yield Header()
+        yield Static("== Parámetros del laboratorio ==", id="titulo")
         with VerticalScroll(id="form"):
             yield Static(
                 "[b]Parámetros del laboratorio[/] - se guardan en ~/.config/servidores-cli/config.json\n"
@@ -336,6 +479,10 @@ class Parametros(PantallaConBitacora):
         if campo == "rango":
             return f"{self.cfg.rango_inicio}-{self.cfg.rango_fin}"
         return str(getattr(self.cfg, campo))
+
+    def on_mount(self) -> None:
+        self.app.sub_title = f"{self.app.cfg.dominio} · Parámetros"
+        self.query_one("#in_dominio", Input).focus()
 
     def action_volver(self) -> None:
         self.app.pop_screen()

@@ -1,3 +1,0 @@
-[console_scripts]
-servidores = servidores_cli.cli:cli
-srv = servidores_cli.cli:cli

@@ -1,6 +1,7 @@
 import threading
 
 from rich.text import Text
+from textual.binding import Binding
 from textual.screen import Screen
 from textual.widgets import RichLog
 
@@ -129,19 +130,19 @@ PASOS_DEPLOY = (
 CSS = """
 Screen { layout: vertical; }
 #principal { height: 1fr; }
-#panel_info { width: 1fr; border: round $primary; padding: 0 1; }
-#menu { width: 44; border: round $accent; padding: 0 1; }
-#pasos_col { width: 1fr; border: round $primary; padding: 0 1; }
-#extras_col { width: 44; border: round $accent; padding: 0 1; }
-#rol { height: auto; padding: 1; border: round $success; margin-bottom: 1; }
-#intro, #intro_dep { height: auto; padding: 1; border: round $secondary; margin-bottom: 1; }
-#topologia { height: auto; max-height: 10; margin: 1 0; }
-#nodos { height: auto; padding: 0 1; }
-#aviso_root { height: auto; padding: 0 1; }
+#panel_info { width: 1fr; border: solid $primary; padding: 0 1; }
+#menu { width: 34; border: solid $accent; padding: 0 1; }
+#pasos_col { width: 1fr; border: solid $primary; padding: 0 1; }
+#extras_col { width: 44; border: solid $accent; padding: 0 1; }
+#rol { height: auto; padding: 0 1; border: solid $success; margin-bottom: 0; }
+#intro, #intro_dep { height: auto; padding: 1; border: solid $secondary; margin-bottom: 1; }
+#topologia { height: auto; max-height: 10; margin: 0; }
+#leyenda { height: auto; padding: 0 1; }
+#titulo { text-style: bold; height: auto; margin-bottom: 0; }
 #menu Label, #extras_col Label { margin: 1 0; }
 Button { width: 100%; margin-bottom: 1; }
-Bitacora { height: 14; border: round $accent; margin-top: 1; }
-#lista_pasos { width: 1fr; border: round $primary; padding: 0 1; }
+Bitacora { height: 20%; border: solid $accent; margin-top: 1; }
+#lista_pasos { width: 1fr; border: solid $primary; padding: 0 1; }
 #lista_pasos Static { height: auto; padding: 0 1; }
 #form { width: 1fr; padding: 0 1; }
 #form Input { margin-bottom: 1; }
@@ -150,6 +151,8 @@ Bitacora { height: 14; border: round $accent; margin-top: 1; }
 
 
 class PantallaConBitacora(Screen):
+    BINDINGS = [Binding("l", "limpiar", "Limpiar log")]
+
     def _salida(self, bitacora):
         app = self.app
 
@@ -166,9 +169,13 @@ class PantallaConBitacora(Screen):
         bitacora = self.query_one("#log", Bitacora)
         return bitacora, self._salida(bitacora)
 
+    def action_limpiar(self) -> None:
+        self.query_one("#log", Bitacora).clear()
+
     def ejecutar(self, etiqueta, funcion, *args, **kwargs):
         app = self.app
         bitacora, on_line = self._hilo()
+        bitacora.escribir(f"--- {etiqueta} ---", "info")
 
         def tarea():
             ctx = Contexto(cfg=app.cfg, run=Runner(dry_run=app.dry_run, on_line=on_line))
@@ -187,21 +194,33 @@ class PantallaConBitacora(Screen):
         def tarea():
             ctx = Contexto(cfg=app.cfg, run=Runner(dry_run=app.dry_run, on_line=on_line))
             total = len(pasos)
+            ok_n = 0
+            fallo_n = 0
+            abortado = False
             for i, (etiqueta, funcion) in enumerate(pasos, 1):
                 if marcar is not None:
                     app.call_from_thread(marcar, i - 1, "curso")
-                app.call_from_thread(bitacora.escribir, f"— Paso {i}/{total}: {etiqueta} —", "info")
+                app.call_from_thread(bitacora.escribir, f"--- Paso {i}/{total}: {etiqueta} ---", "info")
                 try:
                     resultado = funcion(ctx)
                 except Exception as e:
                     if marcar is not None:
                         app.call_from_thread(marcar, i - 1, "error")
                     app.call_from_thread(bitacora.escribir, f"Detenido en el paso {i}: {e}", "error")
-                    return
+                    abortado = True
+                    break
                 if marcar is not None:
                     app.call_from_thread(marcar, i - 1, "hecho" if resultado is not False else "fallo")
                 if resultado is False:
+                    fallo_n += 1
                     app.call_from_thread(bitacora.escribir, f"El paso {i} reportó fallos (se continúa)", "warn")
-            app.call_from_thread(bitacora.escribir, f"{titulo}: secuencia terminada", "ok")
+                else:
+                    ok_n += 1
+            resumen = f"{titulo}: Resumen: {ok_n} OK, {fallo_n} con fallos"
+            if abortado:
+                resumen += " (abortado)"
+            app.call_from_thread(
+                bitacora.escribir, resumen, "ok" if fallo_n == 0 and not abortado else "warn"
+            )
 
         self.run_worker(tarea, thread=True, exclusive=True)
