@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "servidores-cli"
+version = "0.1.0"
+description = "CLI para desplegar los servidores de los laboratorios de Comunicaciones y Laboratorio (UdeA): DNS (Bind9), DHCP (isc-dhcp-server), Correo (Postfix + Dovecot) y Web (Apache)"
+requires-python = ">=3.9"
+dependencies = ["click>=8.1", "textual>=1.0"]
+
+[project.scripts]
+servidores = "servidores_cli.cli:cli"
+srv = "servidores_cli.cli:cli"
+
+[tool.setuptools]
+packages = ["servidores_cli", "servidores_cli.commands"]

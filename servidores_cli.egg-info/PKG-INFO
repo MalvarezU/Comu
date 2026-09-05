@@ -1,0 +1,7 @@
+Metadata-Version: 2.4
+Name: servidores-cli
+Version: 0.1.0
+Summary: CLI para desplegar los servidores de los laboratorios de Comunicaciones y Laboratorio (UdeA): DNS (Bind9), DHCP (isc-dhcp-server), Correo (Postfix + Dovecot) y Web (Apache)
+Requires-Python: >=3.9
+Requires-Dist: click>=8.1
+Requires-Dist: textual>=1.0
