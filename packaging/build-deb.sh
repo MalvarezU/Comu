@@ -24,13 +24,48 @@ rm -rf "$LIB/__pycache__" "$LIB/commands/__pycache__"
 
 cat > "$STAGE/usr/bin/servidores" <<'EOF'
 #!/bin/sh
+# Vendored primero: combinación probada (click/textual/rich/...) gana a los
+# paquetes del sistema para evitar mezclas de versiones en el parcial.
+VENDOR=/usr/share/servidores-cli/vendored
+if [ -d "$VENDOR" ]; then
+  PYTHONPATH="$VENDOR${PYTHONPATH:+:$PYTHONPATH}"
+  export PYTHONPATH
+fi
 exec /usr/bin/python3 -m servidores_cli "$@"
 EOF
 cat > "$STAGE/usr/bin/srv" <<'EOF'
 #!/bin/sh
+VENDOR=/usr/share/servidores-cli/vendored
+if [ -d "$VENDOR" ]; then
+  PYTHONPATH="$VENDOR${PYTHONPATH:+:$PYTHONPATH}"
+  export PYTHONPATH
+fi
 exec /usr/bin/python3 -m servidores_cli "$@"
 EOF
 chmod 755 "$STAGE/usr/bin/servidores" "$STAGE/usr/bin/srv"
+
+# .pth de respaldo: resuelve vendored también con `python3 -m servidores_cli`
+# (los paquetes del sistema, si existen, tienen prioridad aquí).
+echo "/usr/share/servidores-cli/vendored" > "$LIB/../servidores-cli-vendored.pth"
+
+# --- Dependencias Python vendored (offline: click + textual + árbol) ---
+# Ruedas puras (py3-none-any): se descomprimen tal cual, sin pip ni internet
+# en el PC destino. Fijadas a la combinación probada por la suite (89 tests).
+VENDOR="$STAGE/usr/share/servidores-cli/vendored"
+mkdir -p "$VENDOR"
+WHEELS="$(mktemp -d)"
+python3 -m pip download --quiet --only-binary=:all: \
+  --dest "$WHEELS" "click==8.5.0" "textual==8.2.8"
+STAGE_VENV="$VENDOR" WHEELS="$WHEELS" python3 - <<'EOF'
+import glob, os, zipfile
+vendor = os.environ["STAGE_VENV"]
+for whl in sorted(glob.glob(os.path.join(os.environ["WHEELS"], "*.whl"))):
+    with zipfile.ZipFile(whl) as z:
+        z.extractall(vendor)
+print("ruedas instaladas:", len(glob.glob(os.path.join(os.environ["WHEELS"], "*.whl"))))
+EOF
+rm -rf "$WHEELS"
+find "$VENDOR" -name "__pycache__" -type d -prune -exec rm -rf {} + 2>/dev/null || true
 
 cat > "$STAGE/usr/share/applications/servidores-cli.desktop" <<'EOF'
 [Desktop Entry]
@@ -57,25 +92,28 @@ License: Material de curso (uso académico, Universidad de Antioquia)
 EOF
 
 # --- Control ---
+# Solo exige python3: click/textual/rich/... van vendored dentro del paquete.
 cat > "$STAGE/DEBIAN/control" <<EOF
 Package: $PKG
 Version: $VER
 Section: education
 Priority: optional
 Architecture: $ARCH
-Depends: python3 (>= 3.9), python3-click (>= 8.1), python3-textual (>= 1.0)
+Depends: python3 (>= 3.9)
 Recommends: bind9, dnsutils, isc-dhcp-server, postfix, dovecot-imapd, dovecot-pop3d, apache2, bsd-mailx
 Maintainer: Curso Comunicaciones y Laboratorio (UdeA)
 Description: CLI + TUI para desplegar servidores de laboratorio (DNS, DHCP, Correo, Web)
  Automatiza la instalación y configuración de Bind9, isc-dhcp-server,
  Postfix + Dovecot y Apache2 para los laboratorios de Comunicaciones.
  Incluye TUI interactivo y comandos CLI por servicio.
+ Funciona sin internet: las dependencias Python (click, textual, rich)
+ van incluidas en el paquete.
 EOF
 cat > "$STAGE/DEBIAN/postinst" <<'EOF'
 #!/bin/sh
 set -e
 if command -v python3 >/dev/null 2>&1; then
-  python3 -m compileall -q /usr/lib/python3/dist-packages/servidores_cli || true
+  python3 -m compileall -q /usr/lib/python3/dist-packages/servidores_cli /usr/share/servidores-cli/vendored || true
 fi
 if command -v update-desktop-database >/dev/null 2>&1; then
   update-desktop-database -q /usr/share/applications || true

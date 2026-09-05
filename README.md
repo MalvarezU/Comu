@@ -11,7 +11,7 @@ Sin argumentos abre el TUI; con subcomando corre el CLI.
 
 ## Instalación (una vez por máquina)
 
-### Opción 1 · Paquete .deb (recomendado para el laboratorio)
+### Opción 1 · Paquete .deb todo incluido (recomendado para el laboratorio)
 
 Doble clic en `dist/servidores-cli_0.1.0_all.deb`, o por terminal:
 
@@ -19,8 +19,10 @@ Doble clic en `dist/servidores-cli_0.1.0_all.deb`, o por terminal:
 sudo apt install ./dist/servidores-cli_0.1.0_all.deb
 ```
 
-Instala `servidores`/`srv`, sus dependencias (`python3-click`, `python3-textual`)
-y un lanzador en el menú ("Servidores CLI"). Para reconstruir el paquete:
+**Funciona sin internet**: solo exige `python3`; las dependencias Python
+(`click`, `textual`, `rich` y su árbol, combinación probada por la suite)
+van vendored dentro del paquete. Instala `servidores`/`srv` y un lanzador
+en el menú ("Servidores CLI"). Para reconstruir el paquete:
 
 ```bash
 ./packaging/build-deb.sh   # deja el .deb en dist/ (solo necesita sh, ar, tar, gzip, python3)
